@@ -1,14 +1,13 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { Lock, Zap } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
 export function LoginForm() {
-  const router = useRouter();
   const searchParams = useSearchParams();
   const redirect = searchParams.get("redirect") || "/create";
 
@@ -25,7 +24,8 @@ export function LoginForm() {
       const response = await fetch("/api/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ password }),
+        credentials: "same-origin",
+        body: JSON.stringify({ password: password.trim() }),
       });
 
       const result = await response.json();
@@ -37,8 +37,8 @@ export function LoginForm() {
         return;
       }
 
-      router.push(redirect);
-      router.refresh();
+      // Full navigation ensures the auth cookie is sent on the next request.
+      window.location.assign(redirect);
     } catch {
       setError("Something went wrong. Please try again.");
     } finally {
