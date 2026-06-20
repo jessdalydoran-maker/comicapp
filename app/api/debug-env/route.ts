@@ -9,6 +9,7 @@ export async function GET() {
   const password = getCreatorPassword();
 
   return NextResponse.json({
+    endpoint: "/api/debug-env",
     creatorPasswordSet: password != null,
     creatorPasswordLength: password?.length ?? 0,
     nodeEnv: process.env.NODE_ENV ?? null,
