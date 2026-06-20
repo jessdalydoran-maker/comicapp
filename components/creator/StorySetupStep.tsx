@@ -59,15 +59,18 @@ export function StorySetupStep({ data, onChange }: StorySetupStepProps) {
         <div className="space-y-2">
           <Label className="text-comic-yellow">Genre</Label>
           <Select
-            value={data.genre}
+            value={data.genre || undefined}
             onValueChange={(value) =>
               onChange({ genre: value as CreateFormData["genre"] })
             }
           >
-            <SelectTrigger className="w-full border-comic-yellow/50 bg-black/50 font-comic-neue">
+            <SelectTrigger className="w-full border-comic-yellow/50 bg-black/50 font-comic-neue text-white">
               <SelectValue placeholder="Pick a genre" />
             </SelectTrigger>
-            <SelectContent className="border-comic-yellow bg-popover">
+            <SelectContent
+              position="popper"
+              className="border-comic-yellow bg-[#111] text-white"
+            >
               {GENRES.map((genre) => (
                 <SelectItem key={genre} value={genre}>
                   {genre}
@@ -101,10 +104,13 @@ export function StorySetupStep({ data, onChange }: StorySetupStepProps) {
               })
             }
           >
-            <SelectTrigger className="w-full border-comic-yellow/50 bg-black/50 font-comic-neue">
+            <SelectTrigger className="w-full border-comic-yellow/50 bg-black/50 font-comic-neue text-white">
               <SelectValue placeholder="Select page count" />
             </SelectTrigger>
-            <SelectContent className="border-comic-yellow bg-popover">
+            <SelectContent
+              position="popper"
+              className="border-comic-yellow bg-[#111] text-white"
+            >
               {PAGE_COUNTS.map((count) => (
                 <SelectItem key={count} value={String(count)}>
                   {count} pages · {getPriceForPages(count)}

@@ -206,10 +206,13 @@ export function CharacterBuilderStep({
                         })
                       }
                     >
-                      <SelectTrigger className="border-comic-yellow/50 bg-black/50 font-comic-neue">
+                      <SelectTrigger className="w-full border-comic-yellow/50 bg-black/50 font-comic-neue text-white">
                         <SelectValue />
                       </SelectTrigger>
-                      <SelectContent>
+                      <SelectContent
+                        position="popper"
+                        className="border-comic-yellow bg-[#111] text-white"
+                      >
                         {CHARACTER_ROLES.map((role) => (
                           <SelectItem key={role} value={role}>
                             {role.charAt(0).toUpperCase() + role.slice(1)}
