@@ -11,6 +11,8 @@ export interface GenerateComicInput {
 }
 
 const COMIC_MODEL = "claude-sonnet-4-6";
+const COMIC_GENERATION_MAX_TOKENS = 4000;
+const MIN_COMIC_PAGE_COUNT = 2;
 
 const SYSTEM_PROMPT = `You are a professional comic book writer and panel layout artist. 
 You write gripping, cinematic comic scripts with real emotional weight, 
@@ -58,7 +60,14 @@ Rules:
 - Panel sizes must match the layout (e.g. splash page has one large panel).
 - pageNumber and panelNumber start at 1 and increment sequentially.
 - Include sfx and caption where dramatically appropriate; use null when not needed.
-- characters array lists which named characters appear visually in each panel.`;
+- characters array lists which named characters appear visually in each panel.
+
+Output limits (critical):
+- Keep responses concise: setting/action/mood under 120 characters, dialogue lines under 100 characters.
+- Use 1-2 dialogue lines per panel maximum.
+- Never exceed the requested page count.
+- Your output MUST be complete, valid JSON. Always close every string, array, and object with proper brackets before stopping.
+- If you are running low on space, shorten text fields — never leave JSON unclosed or truncated.`;
 
 export class ComicGenerationError extends Error {
   constructor(message: string) {
@@ -92,7 +101,7 @@ ${characterList}
 
 Number of pages requested: ${pageCount}
 
-Return only the JSON object.`;
+Keep all fields concise so the JSON fits in one response. Return exactly ${pageCount} pages with complete, closed JSON only.`;
 }
 
 function stripOptionalQuotes(value: string): string {
@@ -170,14 +179,87 @@ function extractBalancedJsonObject(text: string): string | null {
   return null;
 }
 
+function repairTruncatedJson(text: string): string | null {
+  const start = text.indexOf("{");
+  if (start === -1) {
+    return null;
+  }
+
+  const slice = text.slice(start).trimEnd();
+  const stack: ("object" | "array")[] = [];
+  let inString = false;
+  let escaped = false;
+
+  for (let index = 0; index < slice.length; index++) {
+    const char = slice[index];
+
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (char === "\\") {
+        escaped = true;
+      } else if (char === '"') {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (char === '"') {
+      inString = true;
+      continue;
+    }
+
+    if (char === "{") {
+      stack.push("object");
+    } else if (char === "[") {
+      stack.push("array");
+    } else if (char === "}") {
+      if (stack[stack.length - 1] === "object") {
+        stack.pop();
+      }
+    } else if (char === "]") {
+      if (stack[stack.length - 1] === "array") {
+        stack.pop();
+      }
+    }
+  }
+
+  if (stack.length === 0 && !inString) {
+    return null;
+  }
+
+  let repaired = slice;
+
+  if (inString) {
+    repaired += '"';
+  }
+
+  repaired = repaired.replace(/,\s*"[^"]*"?\s*:\s*"[^"]*"?\s*$/, "");
+  repaired = repaired.replace(/,\s*"[^"]*"?\s*:\s*[^,}\]]*$/, "");
+  repaired = repaired.replace(/,\s*"[^"]*"?\s*$/, "");
+  repaired = repaired.replace(/,\s*$/, "");
+  repaired = repaired.replace(/:\s*$/, ": null");
+
+  while (stack.length > 0) {
+    const kind = stack.pop();
+    repaired += kind === "array" ? "]" : "}";
+  }
+
+  return repaired;
+}
+
 function buildJsonCandidates(text: string): string[] {
   const trimmed = text.trim();
   const stripped = stripMarkdownCodeBlocks(trimmed);
+  const repairedFromStripped = repairTruncatedJson(stripped);
+  const repairedFromTrimmed = repairTruncatedJson(trimmed);
   const candidates = [
     trimmed,
     stripped,
     extractBalancedJsonObject(stripped),
     extractBalancedJsonObject(trimmed),
+    repairedFromStripped,
+    repairedFromTrimmed,
   ].filter((value): value is string => Boolean(value && value.trim()));
 
   return Array.from(new Set(candidates));
@@ -321,6 +403,73 @@ function parseGeneratedComic(text: string): GeneratedComic {
   };
 }
 
+function isTruncationParseError(error: unknown): boolean {
+  if (!(error instanceof ComicGenerationError)) {
+    return false;
+  }
+
+  const message = error.message.toLowerCase();
+  return (
+    message.includes("unexpected end of json input") ||
+    message.includes("unterminated string")
+  );
+}
+
+function isResponseTruncated(text: string, stopReason: string | null): boolean {
+  return (
+    stopReason === "max_tokens" ||
+    (text.includes("{") && extractBalancedJsonObject(text) === null)
+  );
+}
+
+interface AnthropicComicResponse {
+  text: string;
+  stopReason: string | null;
+}
+
+async function requestComicFromAnthropic(
+  client: Anthropic,
+  input: GenerateComicInput,
+  pageCount: number
+): Promise<AnthropicComicResponse> {
+  const response = await client.messages.create({
+    model: COMIC_MODEL,
+    max_tokens: COMIC_GENERATION_MAX_TOKENS,
+    system: SYSTEM_PROMPT,
+    messages: [
+      {
+        role: "user",
+        content: buildUserPrompt({ ...input, pageCount }),
+      },
+    ],
+  });
+
+  const textBlock = response.content.find((block) => block.type === "text");
+
+  if (!textBlock || textBlock.type !== "text") {
+    console.error("[generateComic] No text block in Anthropic response", {
+      contentTypes: response.content.map((block) => block.type),
+      stopReason: response.stop_reason,
+      pageCount,
+    });
+    throw new ComicGenerationError("No text response received from Claude.");
+  }
+
+  if (response.stop_reason === "max_tokens") {
+    console.warn("[generateComic] Response truncated at max_tokens", {
+      pageCount,
+      maxTokens: COMIC_GENERATION_MAX_TOKENS,
+      responseLength: textBlock.text.length,
+      responsePreview: textBlock.text.slice(-500),
+    });
+  }
+
+  return {
+    text: textBlock.text,
+    stopReason: response.stop_reason,
+  };
+}
+
 export async function generateComic(
   input: GenerateComicInput
 ): Promise<GeneratedComic> {
@@ -349,52 +498,78 @@ export async function generateComic(
   }
 
   const client = new Anthropic({ apiKey });
+  const requestedPageCount = input.pageCount ?? 4;
+  let attemptPageCount = requestedPageCount;
+  let lastError: ComicGenerationError | undefined;
 
-  let response;
+  while (attemptPageCount >= MIN_COMIC_PAGE_COUNT) {
+    let response: AnthropicComicResponse;
 
-  try {
-    response = await client.messages.create({
-      model: COMIC_MODEL,
-      max_tokens: 8192,
-      system: SYSTEM_PROMPT,
-      messages: [
-        {
-          role: "user",
-          content: buildUserPrompt(input),
-        },
-      ],
-    });
-  } catch (error) {
-    const message =
-      error instanceof Error
-        ? error.message
-        : "Anthropic API request failed.";
-    console.error("[generateComic] Anthropic API request failed", {
-      message,
-      apiKeyConfigured: true,
-      apiKeyLength: apiKey.length,
-    });
-    throw new ComicGenerationError(message);
+    try {
+      response = await requestComicFromAnthropic(client, input, attemptPageCount);
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Anthropic API request failed.";
+      console.error("[generateComic] Anthropic API request failed", {
+        message,
+        pageCount: attemptPageCount,
+        apiKeyConfigured: true,
+        apiKeyLength: apiKey.length,
+      });
+      throw new ComicGenerationError(message);
+    }
+
+    try {
+      const comic = parseGeneratedComic(response.text);
+
+      if (attemptPageCount < requestedPageCount) {
+        console.warn("[generateComic] Generated fewer pages after retry", {
+          requestedPageCount,
+          generatedPageCount: comic.pages.length,
+          attemptPageCount,
+        });
+      }
+
+      return comic;
+    } catch (error) {
+      if (!(error instanceof ComicGenerationError)) {
+        throw error;
+      }
+
+      lastError = error;
+      const truncated = isResponseTruncated(response.text, response.stopReason);
+      const parseLooksTruncated = isTruncationParseError(error);
+
+      if (
+        (truncated || parseLooksTruncated) &&
+        attemptPageCount > MIN_COMIC_PAGE_COUNT
+      ) {
+        const nextPageCount = Math.max(
+          MIN_COMIC_PAGE_COUNT,
+          attemptPageCount - 2
+        );
+        console.warn("[generateComic] Retrying comic generation with fewer pages", {
+          previousPageCount: attemptPageCount,
+          nextPageCount,
+          stopReason: response.stopReason,
+          parseError: error.message,
+        });
+        attemptPageCount = nextPageCount;
+        continue;
+      }
+
+      throw error;
+    }
   }
 
-  const textBlock = response.content.find((block) => block.type === "text");
-
-  if (!textBlock || textBlock.type !== "text") {
-    console.error("[generateComic] No text block in Anthropic response", {
-      contentTypes: response.content.map((block) => block.type),
-      stopReason: response.stop_reason,
-    });
-    throw new ComicGenerationError("No text response received from Claude.");
-  }
-
-  if (response.stop_reason === "max_tokens") {
-    console.warn("[generateComic] Response truncated at max_tokens", {
-      responseLength: textBlock.text.length,
-      responsePreview: textBlock.text.slice(0, 500),
-    });
-  }
-
-  return parseGeneratedComic(textBlock.text);
+  throw (
+    lastError ??
+    new ComicGenerationError(
+      "Failed to generate comic after retries with reduced page count."
+    )
+  );
 }
 
 export interface RegeneratePageInput {
