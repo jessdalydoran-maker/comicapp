@@ -95,10 +95,136 @@ Number of pages requested: ${pageCount}
 Return only the JSON object.`;
 }
 
-function extractJsonPayload(text: string): string {
+function stripOptionalQuotes(value: string): string {
+  if (
+    (value.startsWith('"') && value.endsWith('"')) ||
+    (value.startsWith("'") && value.endsWith("'"))
+  ) {
+    return value.slice(1, -1);
+  }
+  return value;
+}
+
+export function getAnthropicApiKey(): string | undefined {
+  const raw = process.env.ANTHROPIC_API_KEY;
+  if (raw == null || raw.trim() === "") {
+    return undefined;
+  }
+
+  return stripOptionalQuotes(raw.trim());
+}
+
+function stripMarkdownCodeBlocks(text: string): string {
+  let result = text.trim();
+
+  const fenced = result.match(/```(?:json|JSON)?\s*([\s\S]*?)```/i);
+  if (fenced) {
+    return fenced[1].trim();
+  }
+
+  result = result.replace(/^```(?:json|JSON)?\s*\r?\n?/i, "");
+  result = result.replace(/\r?\n?```\s*$/i, "");
+
+  return result.trim();
+}
+
+function extractBalancedJsonObject(text: string): string | null {
+  const start = text.indexOf("{");
+  if (start === -1) {
+    return null;
+  }
+
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+
+  for (let index = start; index < text.length; index++) {
+    const char = text[index];
+
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (char === "\\") {
+        escaped = true;
+      } else if (char === '"') {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (char === '"') {
+      inString = true;
+      continue;
+    }
+
+    if (char === "{") {
+      depth += 1;
+    } else if (char === "}") {
+      depth -= 1;
+      if (depth === 0) {
+        return text.slice(start, index + 1);
+      }
+    }
+  }
+
+  return null;
+}
+
+function buildJsonCandidates(text: string): string[] {
   const trimmed = text.trim();
-  const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/);
-  return fenced ? fenced[1].trim() : trimmed;
+  const stripped = stripMarkdownCodeBlocks(trimmed);
+  const candidates = [
+    trimmed,
+    stripped,
+    extractBalancedJsonObject(stripped),
+    extractBalancedJsonObject(trimmed),
+  ].filter((value): value is string => Boolean(value && value.trim()));
+
+  return Array.from(new Set(candidates));
+}
+
+function logJsonParseFailure(
+  context: string,
+  rawText: string,
+  candidates: string[],
+  lastError: Error | undefined
+): void {
+  const apiKey = getAnthropicApiKey();
+
+  console.error(`[generateComic] ${context}: failed to parse JSON`, {
+    responseLength: rawText.length,
+    responsePreview: rawText.slice(0, 2000),
+    candidatesTried: candidates.length,
+    candidatePreviews: candidates.map((candidate) => candidate.slice(0, 500)),
+    parseError: lastError?.message ?? "Unknown parse error",
+    anthropicApiKeyConfigured: Boolean(apiKey),
+    anthropicApiKeyLength: apiKey?.length ?? 0,
+  });
+}
+
+function parseJsonRobustly(
+  text: string,
+  context: string
+): unknown {
+  const candidates = buildJsonCandidates(text);
+  let lastError: Error | undefined;
+
+  for (const candidate of candidates) {
+    try {
+      return JSON.parse(candidate);
+    } catch (error) {
+      lastError =
+        error instanceof Error ? error : new Error("Unknown JSON parse error");
+    }
+  }
+
+  logJsonParseFailure(context, text, candidates, lastError);
+
+  throw new ComicGenerationError(
+    `Failed to parse comic layout: response was not valid JSON.${
+      lastError ? ` (${lastError.message})` : ""
+    }`
+  );
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -156,15 +282,7 @@ function isComicPage(value: unknown): value is ComicPage {
 }
 
 function parseGeneratedComic(text: string): GeneratedComic {
-  let parsed: unknown;
-
-  try {
-    parsed = JSON.parse(extractJsonPayload(text));
-  } catch {
-    throw new ComicGenerationError(
-      "Failed to parse comic layout: response was not valid JSON."
-    );
-  }
+  const parsed = parseJsonRobustly(text, "parseGeneratedComic");
 
   if (!isRecord(parsed)) {
     throw new ComicGenerationError(
@@ -206,10 +324,16 @@ function parseGeneratedComic(text: string): GeneratedComic {
 export async function generateComic(
   input: GenerateComicInput
 ): Promise<GeneratedComic> {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
+  const apiKey = getAnthropicApiKey();
 
   if (!apiKey) {
-    throw new ComicGenerationError("ANTHROPIC_API_KEY is not configured.");
+    console.error("[generateComic] ANTHROPIC_API_KEY is missing or empty", {
+      nodeEnv: process.env.NODE_ENV ?? null,
+      vercelEnv: process.env.VERCEL_ENV ?? null,
+    });
+    throw new ComicGenerationError(
+      "ANTHROPIC_API_KEY is not configured. Add it in your environment variables."
+    );
   }
 
   if (!input.title?.trim()) {
@@ -245,13 +369,29 @@ export async function generateComic(
       error instanceof Error
         ? error.message
         : "Anthropic API request failed.";
+    console.error("[generateComic] Anthropic API request failed", {
+      message,
+      apiKeyConfigured: true,
+      apiKeyLength: apiKey.length,
+    });
     throw new ComicGenerationError(message);
   }
 
   const textBlock = response.content.find((block) => block.type === "text");
 
   if (!textBlock || textBlock.type !== "text") {
+    console.error("[generateComic] No text block in Anthropic response", {
+      contentTypes: response.content.map((block) => block.type),
+      stopReason: response.stop_reason,
+    });
     throw new ComicGenerationError("No text response received from Claude.");
+  }
+
+  if (response.stop_reason === "max_tokens") {
+    console.warn("[generateComic] Response truncated at max_tokens", {
+      responseLength: textBlock.text.length,
+      responsePreview: textBlock.text.slice(0, 500),
+    });
   }
 
   return parseGeneratedComic(textBlock.text);
@@ -314,15 +454,7 @@ Return only a JSON object for the single regenerated page with pageNumber, layou
 }
 
 function parseGeneratedPage(text: string, expectedPageNumber: number): ComicPage {
-  let parsed: unknown;
-
-  try {
-    parsed = JSON.parse(extractJsonPayload(text));
-  } catch {
-    throw new ComicGenerationError(
-      "Failed to parse regenerated page: response was not valid JSON."
-    );
-  }
+  const parsed = parseJsonRobustly(text, "parseGeneratedPage");
 
   if (!isRecord(parsed)) {
     throw new ComicGenerationError(
@@ -351,10 +483,16 @@ function parseGeneratedPage(text: string, expectedPageNumber: number): ComicPage
 export async function regeneratePage(
   input: RegeneratePageInput
 ): Promise<ComicPage> {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
+  const apiKey = getAnthropicApiKey();
 
   if (!apiKey) {
-    throw new ComicGenerationError("ANTHROPIC_API_KEY is not configured.");
+    console.error("[generateComic] ANTHROPIC_API_KEY is missing or empty", {
+      nodeEnv: process.env.NODE_ENV ?? null,
+      vercelEnv: process.env.VERCEL_ENV ?? null,
+    });
+    throw new ComicGenerationError(
+      "ANTHROPIC_API_KEY is not configured. Add it in your environment variables."
+    );
   }
 
   if (!input.comic?.pages?.length) {
@@ -392,12 +530,21 @@ export async function regeneratePage(
       error instanceof Error
         ? error.message
         : "Anthropic API request failed.";
+    console.error("[generateComic] Anthropic page regeneration failed", {
+      message,
+      apiKeyConfigured: true,
+      apiKeyLength: apiKey.length,
+    });
     throw new ComicGenerationError(message);
   }
 
   const textBlock = response.content.find((block) => block.type === "text");
 
   if (!textBlock || textBlock.type !== "text") {
+    console.error("[generateComic] No text block in page regeneration response", {
+      contentTypes: response.content.map((block) => block.type),
+      stopReason: response.stop_reason,
+    });
     throw new ComicGenerationError("No text response received from Claude.");
   }
 

@@ -6,6 +6,8 @@ import {
 } from "@/lib/generateComic";
 import type { Character, GeneratedComic } from "@/lib/types";
 
+export const runtime = "nodejs";
+
 export async function POST(request: Request) {
   try {
     const body = await request.json();
@@ -35,11 +37,13 @@ export async function POST(request: Request) {
     return NextResponse.json({ page });
   } catch (error) {
     if (error instanceof ComicGenerationError) {
+      console.error("[/api/generate/page]", error.message);
       return NextResponse.json({ error: error.message }, { status: 422 });
     }
 
     const message =
       error instanceof Error ? error.message : "Failed to regenerate page.";
+    console.error("[/api/generate/page] Unexpected error:", message, error);
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
