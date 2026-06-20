@@ -1,33 +1,19 @@
 import { NextResponse } from "next/server";
 
-import {
-  CREATOR_AUTH_COOKIE,
-  getAuthCookieOptions,
-  getCreatorPassword,
-  verifyCreatorPassword,
-} from "@/lib/auth";
+import { CREATOR_AUTH_COOKIE, getAuthCookieOptions } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
+// TEMP: hardcoded while diagnosing Vercel env var issues — restore CREATOR_PASSWORD later.
+const TEMP_CREATOR_PASSWORD = "ComicForge2025";
+
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const password = typeof body.password === "string" ? body.password : "";
+    const password = typeof body.password === "string" ? body.password.trim() : "";
 
-    const expected = getCreatorPassword();
-
-    if (!expected) {
-      return NextResponse.json(
-        {
-          error:
-            "Creator password is not configured on the server. Set CREATOR_PASSWORD in Vercel environment variables for Production.",
-        },
-        { status: 500 }
-      );
-    }
-
-    if (!verifyCreatorPassword(password)) {
+    if (password !== TEMP_CREATOR_PASSWORD) {
       return NextResponse.json(
         { error: "Wrong password. This is a private creator studio." },
         { status: 401 }
