@@ -7,40 +7,126 @@ import { Lock, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
+interface LoginDebugInfo {
+  status?: number;
+  apiReached: boolean;
+  apiVersion?: string;
+  receivedPasswordLength?: number;
+  expectedPasswordLength?: number;
+  message?: string;
+}
+
 export function LoginForm() {
   const searchParams = useSearchParams();
   const redirect = searchParams.get("redirect") || "/create";
 
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [debugInfo, setDebugInfo] = useState<LoginDebugInfo | null>(null);
   const [isLoading, setIsLoading] = useState(false);
 
-  async function handleSubmit(event: React.FormEvent) {
+  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setIsLoading(true);
     setError(null);
+    setDebugInfo(null);
+
+    const trimmedPassword = password.trim();
+    const apiUrl = `${window.location.origin}/api/login`;
+
+    console.log("[LoginForm] submitting", {
+      apiUrl,
+      passwordLength: trimmedPassword.length,
+      redirect,
+    });
 
     try {
-      const response = await fetch("/api/login", {
+      const response = await fetch(apiUrl, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "same-origin",
-        body: JSON.stringify({ password: password.trim() }),
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+        },
+        credentials: "include",
+        cache: "no-store",
+        body: JSON.stringify({ password: trimmedPassword }),
       });
 
-      const result = await response.json();
+      const apiVersion = response.headers.get("X-Login-Api-Version") ?? undefined;
+      const responseText = await response.text();
+      let result: Record<string, unknown> = {};
 
-      if (!response.ok) {
+      try {
+        result = JSON.parse(responseText) as Record<string, unknown>;
+      } catch {
+        console.error("[LoginForm] non-JSON response", {
+          status: response.status,
+          responseText: responseText.slice(0, 200),
+        });
+
+        setDebugInfo({
+          apiReached: response.status !== 404,
+          status: response.status,
+          apiVersion,
+          message: "API did not return JSON",
+        });
         setError(
-          result.error ?? "Wrong password. This is a private creator studio."
+          response.status === 404
+            ? "Login API not found (404). The latest deployment may not be live yet."
+            : "Login API returned an unexpected response."
         );
         return;
       }
 
-      // Full navigation ensures the auth cookie is sent on the next request.
+      console.log("[LoginForm] API response", {
+        status: response.status,
+        ok: response.ok,
+        result,
+        apiVersion,
+      });
+
+      const resultDebug =
+        result.debug && typeof result.debug === "object"
+          ? (result.debug as Record<string, unknown>)
+          : null;
+
+      setDebugInfo({
+        apiReached: true,
+        status: response.status,
+        apiVersion:
+          apiVersion ??
+          (typeof resultDebug?.apiVersion === "string"
+            ? resultDebug.apiVersion
+            : undefined),
+        receivedPasswordLength:
+          typeof resultDebug?.receivedPasswordLength === "number"
+            ? resultDebug.receivedPasswordLength
+            : undefined,
+        expectedPasswordLength:
+          typeof resultDebug?.expectedPasswordLength === "number"
+            ? resultDebug.expectedPasswordLength
+            : undefined,
+      });
+
+      if (!response.ok) {
+        setError(
+          typeof result.error === "string"
+            ? result.error
+            : "Wrong password. This is a private creator studio."
+        );
+        return;
+      }
+
       window.location.assign(redirect);
-    } catch {
-      setError("Something went wrong. Please try again.");
+    } catch (fetchError) {
+      console.error("[LoginForm] fetch failed", fetchError);
+
+      setDebugInfo({
+        apiReached: false,
+        message:
+          fetchError instanceof Error ? fetchError.message : "Network error",
+      });
+      setError("Could not reach the login API. Check your connection and retry.");
     } finally {
       setIsLoading(false);
     }
@@ -74,6 +160,7 @@ export function LoginForm() {
             </label>
             <Input
               id="password"
+              name="password"
               type="password"
               value={password}
               onChange={(event) => setPassword(event.target.value)}
@@ -87,6 +174,12 @@ export function LoginForm() {
             <p className="rounded-lg border border-comic-red bg-comic-red/10 px-4 py-3 font-comic-neue text-sm text-comic-red">
               {error}
             </p>
+          )}
+
+          {debugInfo && (
+            <pre className="overflow-x-auto rounded-lg border border-comic-yellow/30 bg-black/40 p-3 font-mono text-[10px] text-comic-yellow">
+              {JSON.stringify(debugInfo, null, 2)}
+            </pre>
           )}
 
           <Button
