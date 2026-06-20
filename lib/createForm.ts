@@ -26,12 +26,16 @@ export const LOADING_MESSAGES = [
 
 export type Genre = (typeof GENRES)[number];
 
+export interface CreateFormCharacter extends Character {
+  storageId: string;
+}
+
 export interface CreateFormData {
   title: string;
   genre: Genre | "";
   synopsis: string;
   pageCount: PageCount;
-  characters: Character[];
+  characters: CreateFormCharacter[];
 }
 
 export const initialFormData: CreateFormData = {
@@ -42,14 +46,29 @@ export const initialFormData: CreateFormData = {
   characters: [],
 };
 
-export function createEmptyCharacter(): Character {
+export function createEmptyCharacter(): CreateFormCharacter {
   return {
     name: "",
     role: "hero",
     powers: "",
     personality: "",
     imageBase64: "",
+    storageId: crypto.randomUUID(),
   };
+}
+
+export function toApiCharacters(
+  characters: CreateFormCharacter[]
+): Character[] {
+  return characters.map(
+    ({ name, role, powers, personality, imageBase64 }) => ({
+      name,
+      role,
+      powers,
+      personality,
+      imageBase64,
+    })
+  );
 }
 
 export { PAGE_COUNTS };

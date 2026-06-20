@@ -1,3 +1,7 @@
+import {
+  storeCharacterImagesFromForm,
+  stripCharacterImagesForStorage,
+} from "./characterImageStorage";
 import type { PreviewState } from "./types";
 
 const PREVIEW_KEY = "comic-forge-preview";
@@ -6,9 +10,19 @@ function isClient(): boolean {
   return typeof window !== "undefined";
 }
 
-export function savePreviewState(state: PreviewState): void {
+export async function savePreviewState(state: PreviewState): Promise<void> {
   if (!isClient()) return;
-  localStorage.setItem(PREVIEW_KEY, JSON.stringify(state));
+
+  const characterImageRefs = await storeCharacterImagesFromForm(
+    state.formCharacters
+  );
+
+  const leanState = stripCharacterImagesForStorage({
+    ...state,
+    characterImages: characterImageRefs,
+  });
+
+  localStorage.setItem(PREVIEW_KEY, JSON.stringify(leanState));
 }
 
 export function getPreviewState(): PreviewState | null {
@@ -23,10 +37,10 @@ export function getPreviewState(): PreviewState | null {
   }
 }
 
-export function updatePreviewComic(
+export async function updatePreviewComic(
   comicData: PreviewState["comicData"]
-): void {
+): Promise<void> {
   const current = getPreviewState();
   if (!current) return;
-  savePreviewState({ ...current, comicData });
+  await savePreviewState({ ...current, comicData });
 }

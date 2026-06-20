@@ -1,11 +1,20 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronLeft, ChevronRight, FolderOpen, Save } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { initialFormData, type CreateFormData } from "@/lib/createForm";
+import {
+  initialFormData,
+  toApiCharacters,
+  type CreateFormData,
+} from "@/lib/createForm";
+import {
+  hasCreateDraft,
+  loadCreateDraftFormData,
+  saveCreateDraft,
+} from "@/lib/draftStorage";
 import { getPriceForPages } from "@/lib/pricing";
 import { savePreviewState } from "@/lib/previewStorage";
 import type { GeneratedComic } from "@/lib/types";
@@ -27,9 +36,35 @@ export function CreateWizard() {
   const [formData, setFormData] = useState<CreateFormData>(initialFormData);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [draftAvailable, setDraftAvailable] = useState(false);
+  const [draftMessage, setDraftMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    setDraftAvailable(hasCreateDraft());
+  }, []);
 
   function updateFormData(updates: Partial<CreateFormData>) {
     setFormData((current) => ({ ...current, ...updates }));
+  }
+
+  function handleSaveDraft() {
+    try {
+      saveCreateDraft(formData);
+      setDraftAvailable(true);
+      setDraftMessage("Draft saved. Character images stay in this browser session.");
+    } catch {
+      setDraftMessage("Failed to save draft. Please try again.");
+    }
+  }
+
+  function handleLoadDraft() {
+    try {
+      setFormData(loadCreateDraftFormData());
+      setDraftMessage("Draft loaded.");
+      setError(null);
+    } catch {
+      setDraftMessage("No saved draft found.");
+    }
   }
 
   function canProceedFromStep1(): boolean {
@@ -72,7 +107,7 @@ export function CreateWizard() {
           title: formData.title,
           genre: formData.genre,
           synopsis: formData.synopsis,
-          characters: formData.characters,
+          characters: toApiCharacters(formData.characters),
           pageCount: formData.pageCount,
         }),
       });
@@ -84,20 +119,18 @@ export function CreateWizard() {
       }
 
       const comicData = result.comicData as GeneratedComic;
-      const characterImages = Object.fromEntries(
-        formData.characters
-          .filter((character) => character.name && character.imageBase64)
-          .map((character) => [character.name, character.imageBase64])
-      );
-
-      savePreviewState({
+      await savePreviewState({
         genre: formData.genre,
         synopsis: formData.synopsis,
         pageCount: formData.pageCount,
         price: getPriceForPages(formData.pageCount),
         comicData,
-        characterImages,
-        formCharacters: formData.characters,
+        characterImages: Object.fromEntries(
+          formData.characters
+            .filter((character) => character.name && character.imageBase64)
+            .map((character) => [character.name, character.name])
+        ),
+        formCharacters: toApiCharacters(formData.characters),
       });
 
       router.push("/preview");
@@ -116,6 +149,32 @@ export function CreateWizard() {
         <p className="mt-3 font-comic-neue text-muted-foreground">
           Build your story, cast your characters, and generate your comic.
         </p>
+        <div className="mt-4 flex flex-wrap items-center justify-center gap-3">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={handleSaveDraft}
+            className="border-comic-yellow/50 bg-transparent text-comic-yellow hover:bg-comic-yellow/10"
+          >
+            <Save className="size-4" />
+            Save Draft
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={handleLoadDraft}
+            disabled={!draftAvailable}
+            className="border-comic-yellow/50 bg-transparent text-comic-yellow hover:bg-comic-yellow/10 disabled:opacity-40"
+          >
+            <FolderOpen className="size-4" />
+            Load Draft
+          </Button>
+        </div>
+        {draftMessage && (
+          <p className="mt-3 font-comic-neue text-sm text-comic-yellow">
+            {draftMessage}
+          </p>
+        )}
       </div>
 
       <nav aria-label="Wizard progress" className="flex justify-center gap-3">

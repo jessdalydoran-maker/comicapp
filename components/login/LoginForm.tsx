@@ -6,10 +6,11 @@ import { Lock, Zap } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { getSafeRedirectPath } from "@/lib/site";
 
 export function LoginForm() {
   const searchParams = useSearchParams();
-  const redirect = searchParams.get("redirect") || "/create";
+  const redirect = getSafeRedirectPath(searchParams.get("redirect"));
 
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);

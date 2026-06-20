@@ -55,6 +55,7 @@ export interface PreviewState {
   pageCount: number;
   price: string;
   comicData: GeneratedComic;
+  /** Character name -> sessionStorage reference key (same as name). */
   characterImages: Record<string, string>;
   formCharacters: Character[];
 }

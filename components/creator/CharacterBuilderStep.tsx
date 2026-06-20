@@ -26,9 +26,15 @@ import {
   CHARACTER_ROLES,
   MAX_CHARACTERS,
   createEmptyCharacter,
+  type CreateFormCharacter,
   type CreateFormData,
 } from "@/lib/createForm";
-import type { Character, CharacterRole } from "@/lib/types";
+import {
+  migrateFormCharacterImageStorage,
+  removeFormCharacterImageStorage,
+  storeFormCharacterImage,
+} from "@/lib/characterImageStorage";
+import type { CharacterRole } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 interface CharacterBuilderStepProps {
@@ -103,16 +109,46 @@ export function CharacterBuilderStep({
   data,
   onChange,
 }: CharacterBuilderStepProps) {
-  function updateCharacters(characters: Character[]) {
+  function updateCharacters(characters: CreateFormCharacter[]) {
     onChange({ characters });
   }
 
-  function updateCharacter(index: number, updates: Partial<Character>) {
+  function updateCharacter(
+    index: number,
+    updates: Partial<CreateFormCharacter>
+  ) {
     updateCharacters(
       data.characters.map((character, i) =>
         i === index ? { ...character, ...updates } : character
       )
     );
+  }
+
+  async function handleImageChange(
+    index: number,
+    character: CreateFormCharacter,
+    base64: string
+  ) {
+    updateCharacter(index, { imageBase64: base64 });
+
+    try {
+      await storeFormCharacterImage(character.name, character.storageId, base64);
+    } catch (error) {
+      console.error("[CharacterBuilderStep] Failed to persist character image", error);
+    }
+  }
+
+  function handleNameChange(
+    index: number,
+    character: CreateFormCharacter,
+    newName: string
+  ) {
+    migrateFormCharacterImageStorage(
+      character.name,
+      newName,
+      character.storageId
+    );
+    updateCharacter(index, { name: newName });
   }
 
   function addCharacter() {
@@ -121,6 +157,8 @@ export function CharacterBuilderStep({
   }
 
   function removeCharacter(index: number) {
+    const character = data.characters[index];
+    removeFormCharacterImageStorage(character.name, character.storageId);
     updateCharacters(data.characters.filter((_, i) => i !== index));
   }
 
@@ -173,7 +211,7 @@ export function CharacterBuilderStep({
               <CharacterImageDropzone
                 imageBase64={character.imageBase64}
                 onImageChange={(base64) =>
-                  updateCharacter(index, { imageBase64: base64 })
+                  void handleImageChange(index, character, base64)
                 }
               />
 
@@ -190,7 +228,7 @@ export function CharacterBuilderStep({
                       id={`char-name-${index}`}
                       value={character.name}
                       onChange={(event) =>
-                        updateCharacter(index, { name: event.target.value })
+                        handleNameChange(index, character, event.target.value)
                       }
                       placeholder="Character name"
                       className="border-comic-yellow/50 bg-black/50 font-comic-neue"

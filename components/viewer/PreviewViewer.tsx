@@ -8,6 +8,11 @@ import { Store, Upload } from "lucide-react";
 import { FlipBook } from "@/components/viewer/FlipBook";
 import { Button } from "@/components/ui/button";
 import {
+  compressCharacterImages,
+  hydratePreviewState,
+  resolveCharacterImages,
+} from "@/lib/characterImageStorage";
+import {
   getPreviewState,
   updatePreviewComic,
 } from "@/lib/previewStorage";
@@ -24,11 +29,12 @@ export function PreviewViewer() {
   const [publishMessage, setPublishMessage] = useState<string | null>(null);
 
   useEffect(() => {
-    setPreviewState(getPreviewState());
+    const stored = getPreviewState();
+    setPreviewState(stored ? hydratePreviewState(stored) : null);
   }, []);
 
   const handleComicChange = useCallback((comicData: GeneratedComic) => {
-    updatePreviewComic(comicData);
+    void updatePreviewComic(comicData);
     setPreviewState((current) =>
       current ? { ...current, comicData } : current
     );
@@ -41,8 +47,11 @@ export function PreviewViewer() {
     setPublishMessage(null);
 
     try {
-      const coverImage =
-        Object.values(previewState.characterImages)[0] ?? "";
+      const resolvedImages = resolveCharacterImages(
+        previewState.characterImages
+      );
+      const compressedImages = await compressCharacterImages(resolvedImages);
+      const coverImage = Object.values(compressedImages)[0] ?? "";
 
       const published = {
         id: generateComicId(),
@@ -54,7 +63,7 @@ export function PreviewViewer() {
         publishedAt: new Date().toISOString(),
         coverImage,
         comicData: previewState.comicData,
-        characterImages: previewState.characterImages,
+        characterImages: compressedImages,
       };
 
       savePublishedComic(published);

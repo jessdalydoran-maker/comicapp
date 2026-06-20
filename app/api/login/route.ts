@@ -2,6 +2,7 @@ import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
 import { CREATOR_AUTH_COOKIE, getAuthCookieOptions } from "@/lib/auth";
+import { getAbsoluteUrl, getSiteUrl } from "@/lib/site";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -14,6 +15,8 @@ export async function GET() {
     ok: true,
     endpoint: "/api/login",
     version: "hardcoded-v2",
+    siteUrl: getSiteUrl(),
+    loginUrl: getAbsoluteUrl("/login"),
   });
 }
 

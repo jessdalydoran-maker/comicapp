@@ -1,3 +1,5 @@
+import { getAuthCookieDomain } from "./site";
+
 export const CREATOR_AUTH_COOKIE = "creator_auth";
 
 const AUTH_COOKIE_MAX_AGE = 60 * 60 * 24 * 7;
@@ -41,12 +43,15 @@ export function isSecureDeployment(): boolean {
 }
 
 export function getAuthCookieOptions() {
+  const domain = getAuthCookieDomain();
+
   return {
     httpOnly: true,
     secure: isSecureDeployment(),
     sameSite: "lax" as const,
     path: "/",
     maxAge: AUTH_COOKIE_MAX_AGE,
+    ...(domain ? { domain } : {}),
   };
 }
 

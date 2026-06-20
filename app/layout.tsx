@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Bangers, Comic_Neue } from "next/font/google";
 
 import { SiteNav } from "@/components/SiteNav";
+import { PRODUCTION_SITE_URL } from "@/lib/site";
 import "./globals.css";
 
 const bangers = Bangers({
@@ -17,8 +18,12 @@ const comicNeue = Comic_Neue({
 });
 
 export const metadata: Metadata = {
+  metadataBase: new URL(PRODUCTION_SITE_URL),
   title: "Comic Forge",
   description: "Create, preview, and sell AI-powered comics",
+  alternates: {
+    canonical: "/",
+  },
 };
 
 export default function RootLayout({
