@@ -1,41 +1,38 @@
-import type { PublishedComic } from "./types";
+import {
+  getPublishedSavedComics,
+  getSavedComicById,
+} from "./comicStorage";
+import type { PublishedComic, SavedComic } from "./types";
 
-const STORAGE_KEY = "comic-forge-published-comics";
+export { generateComicId } from "./comicStorage";
 
-function isClient(): boolean {
-  return typeof window !== "undefined";
+function toPublishedComic(comic: SavedComic): PublishedComic {
+  return {
+    id: comic.id,
+    title: comic.title,
+    tagline: comic.tagline,
+    genre: comic.genre,
+    pages: comic.pageCount,
+    price: comic.price,
+    publishedAt: comic.updatedAt,
+    coverImage: comic.coverImage,
+    comicData: comic.comicData,
+    characterImages: comic.characterImages,
+  };
 }
 
 export function getPublishedComics(): PublishedComic[] {
-  if (!isClient()) return [];
-
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw) as PublishedComic[];
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
+  return getPublishedSavedComics().map(toPublishedComic);
 }
 
 export function getPublishedComicById(id: string): PublishedComic | undefined {
-  return getPublishedComics().find((comic) => comic.id === id);
+  const comic = getSavedComicById(id);
+  if (!comic || comic.status !== "published") return undefined;
+  return toPublishedComic(comic);
 }
 
+/** @deprecated Use publishSavedComic from comicStorage instead */
 export function savePublishedComic(comic: PublishedComic): void {
-  if (!isClient()) return;
-
-  const comics = getPublishedComics();
-  const existingIndex = comics.findIndex((item) => item.id === comic.id);
-  const next =
-    existingIndex >= 0
-      ? comics.map((item, index) => (index === existingIndex ? comic : item))
-      : [comic, ...comics];
-
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
-}
-
-export function generateComicId(): string {
-  return crypto.randomUUID();
+  // Kept for backward compatibility — publishing now goes through comicStorage
+  void comic;
 }

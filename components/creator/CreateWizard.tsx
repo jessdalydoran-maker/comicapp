@@ -16,6 +16,11 @@ import {
   saveCreateDraft,
 } from "@/lib/draftStorage";
 import { getPriceForPages } from "@/lib/pricing";
+import {
+  compressCharacterImages,
+  resolveCharacterImages,
+} from "@/lib/characterImageStorage";
+import { createSavedComic } from "@/lib/comicStorage";
 import { savePreviewState } from "@/lib/previewStorage";
 import type { GeneratedComic } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -30,7 +35,12 @@ const STEPS = [
   { number: 3, label: "Generate" },
 ] as const;
 
-export function CreateWizard() {
+interface CreateWizardProps {
+  onBackToLibrary?: () => void;
+  onComicCreated?: () => void;
+}
+
+export function CreateWizard({ onBackToLibrary }: CreateWizardProps) {
   const router = useRouter();
   const [step, setStep] = useState(1);
   const [formData, setFormData] = useState<CreateFormData>(initialFormData);
@@ -119,7 +129,30 @@ export function CreateWizard() {
       }
 
       const comicData = result.comicData as GeneratedComic;
+      const apiCharacters = toApiCharacters(formData.characters);
+      const resolvedImages = resolveCharacterImages(
+        Object.fromEntries(
+          formData.characters
+            .filter((character) => character.name && character.imageBase64)
+            .map((character) => [character.name, character.imageBase64])
+        )
+      );
+      const compressedImages = await compressCharacterImages(resolvedImages);
+
+      const savedComic = await createSavedComic({
+        title: comicData.title,
+        tagline: comicData.tagline,
+        genre: formData.genre,
+        pageCount: formData.pageCount,
+        comicData,
+        characterImages: compressedImages,
+        synopsis: formData.synopsis,
+        formCharacters: apiCharacters,
+        status: "draft",
+      });
+
       await savePreviewState({
+        comicId: savedComic.id,
         genre: formData.genre,
         synopsis: formData.synopsis,
         pageCount: formData.pageCount,
@@ -130,7 +163,7 @@ export function CreateWizard() {
             .filter((character) => character.name && character.imageBase64)
             .map((character) => [character.name, character.name])
         ),
-        formCharacters: toApiCharacters(formData.characters),
+        formCharacters: apiCharacters,
       });
 
       router.push("/preview");
@@ -143,6 +176,19 @@ export function CreateWizard() {
   return (
     <div className="mx-auto max-w-3xl space-y-8 px-4 py-10">
       <div className="text-center">
+        {onBackToLibrary && (
+          <div className="mb-4 flex justify-start">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={onBackToLibrary}
+              className="border-comic-yellow/50 bg-transparent text-comic-yellow hover:bg-comic-yellow/10"
+            >
+              <ChevronLeft className="size-4" />
+              Back to Create Options
+            </Button>
+          </div>
+        )}
         <h1 className="comic-heading text-5xl text-comic-yellow sm:text-6xl">
           Comic Creator Studio
         </h1>

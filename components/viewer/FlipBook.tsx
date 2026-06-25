@@ -201,6 +201,7 @@ export const FlipBook = forwardRef<FlipBookHandle, FlipBookProps>(
                 comic={displayComic}
                 coverImage={coverImage}
                 genre={genre}
+                issueNumber={1}
               />
             </FlipBookPage>
             {displayPages.map((page) => (

@@ -10,18 +10,38 @@ export interface GenerateComicInput {
   pageCount?: number;
 }
 
+export interface QuickCreateGenerateInput {
+  story: string;
+  genre: string;
+  pageCount?: number;
+  imageFilenames?: string[];
+}
+
+export interface QuickCreateGenerateResult {
+  comicData: GeneratedComic;
+  characters: Character[];
+}
+
 const COMIC_MODEL = "claude-sonnet-4-6";
 const COMIC_GENERATION_MAX_TOKENS = 4000;
 const MIN_COMIC_PAGE_COUNT = 2;
 
-const SYSTEM_PROMPT = `You are a professional comic book writer and panel layout artist. 
-You write gripping, cinematic comic scripts with real emotional weight, 
-sharp dialogue, and dynamic action. You do NOT write generic superhero 
-content. Every panel description should be vivid and specific. 
-Dialogue must sound natural and character-specific based on the 
-personality provided. Structure the story with a proper beginning, 
-rising tension, climax and resolution. Make it feel like a real 
-published comic.
+const SYSTEM_PROMPT = `You are a professional comic book writer with 20 years experience writing for Marvel and DC. You write cinematic, emotionally gripping comics with sharp dialogue, real character voice, and dynamic action sequences.
+
+RULES YOU MUST FOLLOW:
+- Every character must speak in their own distinct voice based on their personality
+- Dialogue must be punchy, natural and never generic
+- Every panel must have a clear visual purpose - establish, action, reaction, or reveal
+- Use varied panel layouts - splash pages for big moments, tight panels for tension, wide panels for action
+- Include proper comic techniques: cliffhangers between pages, visual callbacks, dramatic irony
+- SFX words must be creative and specific to the action (not just BOOM or POW)
+- Caption boxes should read like a narrator with personality
+- Each page must end on a reason to turn to the next page
+- The story must have proper three act structure
+- Action sequences must be broken into clear beat-by-beat panels
+- Emotional moments need breathing room - don't rush them
+- NEVER use clichéd superhero dialogue
+- Make it feel like a real published comic someone would pay for
 
 Return strict JSON in this format:
 {
@@ -30,7 +50,7 @@ Return strict JSON in this format:
   "pages": [
     {
       "pageNumber": number,
-      "layout": "splash" | "two-panel" | "three-panel" | "four-panel" | "five-panel",
+      "layout": "splash" | "two-panel" | "three-panel" | "four-panel" | "five-panel" | "six-panel",
       "panels": [
         {
           "panelNumber": number,
@@ -56,7 +76,7 @@ Return strict JSON in this format:
 
 Rules:
 - Return ONLY valid JSON — no markdown, no commentary.
-- Vary page layouts across the comic (splash, two-panel, three-panel, four-panel, five-panel).
+- Vary page layouts across the comic (splash, two-panel, three-panel, four-panel, five-panel, six-panel).
 - Panel sizes must match the layout (e.g. splash page has one large panel).
 - pageNumber and panelNumber start at 1 and increment sequentially.
 - Include sfx and caption where dramatically appropriate; use null when not needed.
@@ -68,6 +88,49 @@ Output limits (critical):
 - Never exceed the requested page count.
 - Your output MUST be complete, valid JSON. Always close every string, array, and object with proper brackets before stopping.
 - If you are running low on space, shorten text fields — never leave JSON unclosed or truncated.`;
+
+const QUICK_CREATE_INTERPRETATION_PROMPT = `${SYSTEM_PROMPT}
+
+QUICK CREATE MODE — ADDITIONAL INSTRUCTIONS:
+
+The user has provided a free-text story description instead of structured fields. Before writing the comic, you must:
+
+1. READ the story input and extract:
+   - Character names (look for capitalised names or names described as heroes/villains)
+   - Each character's role (hero/villain/sidekick) based on context
+   - Each character's powers based on descriptions
+   - Each character's personality based on how they are described
+   - The plot structure (beginning, conflict, resolution)
+   - The genre/tone from context clues
+
+2. EXPAND intelligently on what's provided:
+   - If powers are mentioned briefly, expand them into vivid comic-ready descriptions
+   - If personality isn't described, infer it from the character's role and powers
+   - Fill in scene details, locations, and atmosphere
+   - Add sub-plots and character moments that fit naturally
+   - Make the story bigger and more cinematic than the input
+
+3. CHARACTER IMAGE MATCHING (for reference — images are assigned client-side):
+   - Uploaded images are listed in order; match characters by order of first mention in the story
+   - If an image filename contains a character name, that image belongs to that character
+   - List characters in your "characters" array in order of first mention in the story
+
+Your JSON response MUST include a top-level "characters" array BEFORE "pages":
+{
+  "title": string,
+  "tagline": string,
+  "characters": [
+    {
+      "name": string,
+      "role": "hero" | "villain" | "sidekick",
+      "powers": string,
+      "personality": string
+    }
+  ],
+  "pages": [ ... same page structure as above ... ]
+}
+
+The "characters" array is required in quick create mode. Use the same character names consistently in panel "characters" arrays and dialogue.`;
 
 export class ComicGenerationError extends Error {
   constructor(message: string) {
@@ -349,6 +412,7 @@ const VALID_LAYOUTS = new Set([
   "three-panel",
   "four-panel",
   "five-panel",
+  "six-panel",
 ]);
 
 function isComicPage(value: unknown): value is ComicPage {
@@ -401,6 +465,192 @@ function parseGeneratedComic(text: string): GeneratedComic {
     tagline: parsed.tagline.trim(),
     pages: parsed.pages as ComicPage[],
   };
+}
+
+function isExtractedCharacter(value: unknown): value is Omit<Character, "imageBase64"> {
+  return (
+    isRecord(value) &&
+    typeof value.name === "string" &&
+    value.name.trim() !== "" &&
+    (value.role === "hero" ||
+      value.role === "villain" ||
+      value.role === "sidekick") &&
+    typeof value.powers === "string" &&
+    typeof value.personality === "string"
+  );
+}
+
+function parseQuickCreateResponse(text: string): QuickCreateGenerateResult {
+  const parsed = parseJsonRobustly(text, "parseQuickCreateResponse");
+
+  if (!isRecord(parsed)) {
+    throw new ComicGenerationError(
+      "Failed to parse comic layout: expected a JSON object."
+    );
+  }
+
+  const comicData = parseGeneratedComic(text);
+
+  let characters: Character[] = [];
+
+  if (Array.isArray(parsed.characters) && parsed.characters.length > 0) {
+    characters = parsed.characters
+      .filter(isExtractedCharacter)
+      .map((character) => ({
+        name: character.name.trim(),
+        role: character.role,
+        powers: character.powers.trim(),
+        personality: character.personality.trim(),
+        imageBase64: "",
+      }));
+  }
+
+  if (characters.length === 0) {
+    const names = new Set<string>();
+    for (const page of comicData.pages) {
+      for (const panel of page.panels) {
+        for (const name of panel.characters) {
+          if (name.trim()) names.add(name.trim());
+        }
+        for (const line of panel.dialogue) {
+          if (line.character.trim()) names.add(line.character.trim());
+        }
+      }
+    }
+    characters = Array.from(names).map((name) => ({
+      name,
+      role: "hero" as const,
+      powers: "Unknown",
+      personality: "Determined",
+      imageBase64: "",
+    }));
+  }
+
+  return { comicData, characters };
+}
+
+function buildQuickCreateUserPrompt(input: QuickCreateGenerateInput): string {
+  const pageCount = input.pageCount ?? 8;
+  const imageList =
+    input.imageFilenames && input.imageFilenames.length > 0
+      ? input.imageFilenames
+          .map((filename, index) => `${index + 1}. ${filename}`)
+          .join("\n")
+      : "No character images uploaded.";
+
+  return `Create a ${pageCount}-page comic from this free-text story description.
+
+Genre: ${input.genre}
+Number of pages: ${pageCount}
+
+Uploaded character images (in upload order):
+${imageList}
+
+STORY DESCRIPTION:
+${input.story}
+
+Extract all characters, expand the story cinematically, and return complete JSON with title, tagline, characters array, and exactly ${pageCount} pages.`;
+}
+
+async function requestQuickCreateFromAnthropic(
+  client: Anthropic,
+  input: QuickCreateGenerateInput,
+  pageCount: number
+): Promise<AnthropicComicResponse> {
+  const response = await client.messages.create({
+    model: COMIC_MODEL,
+    max_tokens: COMIC_GENERATION_MAX_TOKENS,
+    system: QUICK_CREATE_INTERPRETATION_PROMPT,
+    messages: [
+      {
+        role: "user",
+        content: buildQuickCreateUserPrompt({ ...input, pageCount }),
+      },
+    ],
+  });
+
+  const textBlock = response.content.find((block) => block.type === "text");
+
+  if (!textBlock || textBlock.type !== "text") {
+    throw new ComicGenerationError("No text response received from Claude.");
+  }
+
+  return {
+    text: textBlock.text,
+    stopReason: response.stop_reason,
+  };
+}
+
+export async function generateComicQuickCreate(
+  input: QuickCreateGenerateInput
+): Promise<QuickCreateGenerateResult> {
+  const apiKey = getAnthropicApiKey();
+
+  if (!apiKey) {
+    throw new ComicGenerationError(
+      "ANTHROPIC_API_KEY is not configured. Add it in your environment variables."
+    );
+  }
+
+  if (!input.story?.trim()) {
+    throw new ComicGenerationError("Story description is required.");
+  }
+
+  if (!input.genre?.trim()) {
+    throw new ComicGenerationError("Genre is required.");
+  }
+
+  const client = new Anthropic({ apiKey });
+  const requestedPageCount = input.pageCount ?? 8;
+  let attemptPageCount = requestedPageCount;
+  let lastError: ComicGenerationError | undefined;
+
+  while (attemptPageCount >= MIN_COMIC_PAGE_COUNT) {
+    let response: AnthropicComicResponse;
+
+    try {
+      response = await requestQuickCreateFromAnthropic(
+        client,
+        input,
+        attemptPageCount
+      );
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Anthropic API request failed.";
+      throw new ComicGenerationError(message);
+    }
+
+    try {
+      return parseQuickCreateResponse(response.text);
+    } catch (error) {
+      if (!(error instanceof ComicGenerationError)) {
+        throw error;
+      }
+
+      lastError = error;
+      const truncated = isResponseTruncated(response.text, response.stopReason);
+      const parseLooksTruncated = isTruncationParseError(error);
+
+      if (
+        (truncated || parseLooksTruncated) &&
+        attemptPageCount > MIN_COMIC_PAGE_COUNT
+      ) {
+        attemptPageCount = Math.max(MIN_COMIC_PAGE_COUNT, attemptPageCount - 2);
+        continue;
+      }
+
+      throw error;
+    }
+  }
+
+  throw (
+    lastError ??
+    new ComicGenerationError(
+      "Failed to generate comic after retries with reduced page count."
+    )
+  );
 }
 
 function isTruncationParseError(error: unknown): boolean {

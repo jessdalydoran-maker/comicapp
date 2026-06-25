@@ -8,18 +8,18 @@ import { Store, Upload } from "lucide-react";
 import { FlipBook } from "@/components/viewer/FlipBook";
 import { Button } from "@/components/ui/button";
 import {
-  compressCharacterImages,
   hydratePreviewState,
   resolveCharacterImages,
 } from "@/lib/characterImageStorage";
 import {
+  publishSavedComic,
+  updateSavedComic,
+  updateSavedComicData,
+} from "@/lib/comicStorage";
+import {
   getPreviewState,
   updatePreviewComic,
 } from "@/lib/previewStorage";
-import {
-  generateComicId,
-  savePublishedComic,
-} from "@/lib/shopStorage";
 import type { GeneratedComic, PreviewState } from "@/lib/types";
 
 export function PreviewViewer() {
@@ -35,9 +35,13 @@ export function PreviewViewer() {
 
   const handleComicChange = useCallback((comicData: GeneratedComic) => {
     void updatePreviewComic(comicData);
-    setPreviewState((current) =>
-      current ? { ...current, comicData } : current
-    );
+    setPreviewState((current) => {
+      if (!current) return current;
+      if (current.comicId) {
+        void updateSavedComicData(current.comicId, comicData);
+      }
+      return { ...current, comicData };
+    });
   }, []);
 
   async function handlePublish() {
@@ -50,24 +54,18 @@ export function PreviewViewer() {
       const resolvedImages = resolveCharacterImages(
         previewState.characterImages
       );
-      const compressedImages = await compressCharacterImages(resolvedImages);
-      const coverImage = Object.values(compressedImages)[0] ?? "";
 
-      const published = {
-        id: generateComicId(),
-        title: previewState.comicData.title,
-        tagline: previewState.comicData.tagline,
-        genre: previewState.genre,
-        pages: previewState.pageCount,
-        price: previewState.price,
-        publishedAt: new Date().toISOString(),
-        coverImage,
-        comicData: previewState.comicData,
-        characterImages: compressedImages,
-      };
+      if (previewState.comicId) {
+        updateSavedComic(previewState.comicId, {
+          comicData: previewState.comicData,
+          characterImages: resolvedImages,
+          title: previewState.comicData.title,
+          tagline: previewState.comicData.tagline,
+        });
+        publishSavedComic(previewState.comicId);
+      }
 
-      savePublishedComic(published);
-      setPublishMessage(`"${published.title}" is live in the shop!`);
+      setPublishMessage(`"${previewState.comicData.title}" is live in the shop!`);
 
       setTimeout(() => {
         router.push("/shop");

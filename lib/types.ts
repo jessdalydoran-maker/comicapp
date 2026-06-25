@@ -23,7 +23,10 @@ export type PageLayout =
   | "two-panel"
   | "three-panel"
   | "four-panel"
-  | "five-panel";
+  | "five-panel"
+  | "six-panel";
+
+export type ComicStatus = "draft" | "published";
 
 export interface Panel {
   panelNumber: number;
@@ -49,7 +52,25 @@ export interface GeneratedComic {
   pages: ComicPage[];
 }
 
+export interface SavedComic {
+  id: string;
+  title: string;
+  tagline: string;
+  genre: string;
+  pageCount: number;
+  price: string;
+  status: ComicStatus;
+  createdAt: string;
+  updatedAt: string;
+  coverImage: string;
+  comicData: GeneratedComic;
+  characterImages: Record<string, string>;
+  synopsis?: string;
+  formCharacters?: Character[];
+}
+
 export interface PreviewState {
+  comicId?: string;
   genre: string;
   synopsis: string;
   pageCount: number;

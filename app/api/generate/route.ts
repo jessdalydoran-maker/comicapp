@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import {
   ComicGenerationError,
   generateComic,
+  generateComicQuickCreate,
 } from "@/lib/generateComic";
 import type { Character } from "@/lib/types";
 
@@ -11,6 +12,35 @@ export const runtime = "nodejs";
 export async function POST(request: Request) {
   try {
     const body = await request.json();
+
+    if (body.quickCreate === true) {
+      const { story, genre, pageCount, imageFilenames } = body as {
+        story: string;
+        genre: string;
+        pageCount?: number;
+        imageFilenames?: string[];
+      };
+
+      if (!story?.trim() || !genre?.trim()) {
+        return NextResponse.json(
+          { error: "story and genre are required for quick create." },
+          { status: 400 }
+        );
+      }
+
+      const result = await generateComicQuickCreate({
+        story: story.trim(),
+        genre: genre.trim(),
+        pageCount,
+        imageFilenames: imageFilenames ?? [],
+      });
+
+      return NextResponse.json({
+        comicData: result.comicData,
+        characters: result.characters,
+      });
+    }
+
     const { title, genre, synopsis, characters, pageCount } = body as {
       title: string;
       genre: string;

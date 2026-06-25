@@ -26,34 +26,34 @@ export function ComicPanel({
     ? panel.characters
     : characterNames.slice(0, 1);
 
+  const captionLines = panel.caption ? [panel.caption] : [];
   const narrationLines = panel.dialogue.filter(
     (line) => line.type === "narration"
   );
   const speechLines = panel.dialogue.filter(
-    (line) => line.type !== "narration"
+    (line) => line.type === "speech" || line.type === "thought"
   );
 
   return (
     <div
-      className={`comic-panel relative flex min-h-0 flex-col border-[3px] border-black bg-comic-cream ${className ?? ""}`}
+      className={`comic-panel relative flex min-h-0 flex-col overflow-hidden border-[3px] border-black bg-[#FFFDF5] ${className ?? ""}`}
     >
-      {panel.caption && (
-        <div className="border-b-[3px] border-black bg-comic-yellow px-2 py-1">
-          <p className="font-comic-neue text-[8px] font-bold leading-tight text-black">
-            {panel.caption}
-          </p>
+      {captionLines.length > 0 && (
+        <div className="shrink-0 border-b-2 border-black bg-black px-2 py-1">
+          {captionLines.map((text, index) => (
+            <p
+              key={`caption-${panel.panelNumber}-${index}`}
+              className="font-comic-neue text-[9px] leading-tight text-[#FFD600]"
+            >
+              {text}
+            </p>
+          ))}
         </div>
       )}
 
-      <div className="border-b-[3px] border-black bg-black px-1.5 py-0.5">
-        <p className="truncate font-comic-neue text-[8px] font-bold uppercase tracking-wider text-comic-cream">
-          {panel.setting}
-        </p>
-      </div>
-
-      <div className="halftone-bg relative flex min-h-0 flex-1 flex-col p-1.5">
+      <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
         {narrationLines.length > 0 && (
-          <div className="mb-1 space-y-1">
+          <div className="relative z-20 shrink-0 space-y-0.5 p-1">
             {narrationLines.map((line, index) => (
               <SpeechBubble
                 key={`narration-${panel.panelNumber}-${index}`}
@@ -66,51 +66,57 @@ export function ComicPanel({
           </div>
         )}
 
-        <div className="relative flex min-h-0 flex-1 items-center justify-center gap-1 overflow-hidden border-[3px] border-black bg-black/5">
+        <div className="relative z-10 flex min-h-0 flex-1 items-end justify-center gap-0.5 overflow-hidden px-1 pb-0.5">
+          {speechLines.length > 0 && (
+            <div className="pointer-events-none absolute inset-x-1 top-1 z-30 flex flex-col gap-1">
+              {speechLines.map((line, index) => (
+                <SpeechBubble
+                  key={`${panel.panelNumber}-dialogue-${index}`}
+                  character={line.character}
+                  text={line.text}
+                  type={line.type}
+                  side={getBubbleSide(line.character, panelCharacters, index)}
+                />
+              ))}
+            </div>
+          )}
+
           {panelCharacters.map((name, index) => {
             const image = characterImages[name];
+            const isMulti = panelCharacters.length > 1;
+
             return image ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                key={`${panel.panelNumber}-char-${name}-${index}`}
-                src={image}
-                alt={name}
-                className="h-full max-h-full min-h-0 flex-1 object-cover object-top"
-              />
+              <div
+                key={`${panel.panelNumber}-char-wrap-${name}-${index}`}
+                className={`relative flex h-full min-h-0 items-end justify-center ${
+                  isMulti ? "flex-1" : "w-full"
+                }`}
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={image}
+                  alt={name}
+                  className="max-h-[75%] w-full object-contain object-bottom drop-shadow-[0_4px_6px_rgba(0,0,0,0.35)]"
+                />
+              </div>
             ) : (
               <div
                 key={`${panel.panelNumber}-placeholder-${index}`}
-                className="flex h-full flex-1 items-center justify-center bg-black/10 p-2"
+                className={`flex h-full min-h-0 items-end justify-center pb-2 ${
+                  isMulti ? "flex-1" : "w-full"
+                }`}
               >
-                <span className="font-bangers text-[10px] text-black/50">
+                <span className="font-bangers text-xs text-black/40">
                   {name}
                 </span>
               </div>
             );
           })}
 
-          {panel.sfx && <SfxText text={panel.sfx} />}
+          {panel.sfx && (
+            <SfxText text={panel.sfx} seed={`${panel.panelNumber}-${panel.sfx}`} />
+          )}
         </div>
-
-        {panel.action && (
-          <p className="mt-1 line-clamp-2 font-comic-neue text-[7px] italic leading-tight text-black/70">
-            {panel.action}
-          </p>
-        )}
-
-        {speechLines.length > 0 && (
-          <div className="mt-auto space-y-1 pt-1">
-            {speechLines.map((line, index) => (
-              <SpeechBubble
-                key={`${panel.panelNumber}-dialogue-${index}`}
-                character={line.character}
-                text={line.text}
-                type={line.type}
-                side={getBubbleSide(line.character, characterNames, index)}
-              />
-            ))}
-          </div>
-        )}
       </div>
 
       {onEdit && (
@@ -119,7 +125,7 @@ export function ComicPanel({
           variant="outline"
           size="xs"
           onClick={onEdit}
-          className="absolute right-1 top-1 h-5 border-black bg-white/90 px-1.5 font-comic-neue text-[8px] hover:bg-comic-yellow"
+          className="absolute right-1 top-1 z-40 h-5 border-black bg-white/90 px-1.5 font-comic-neue text-[8px] hover:bg-comic-yellow"
         >
           <Pencil className="size-2.5" />
           Edit

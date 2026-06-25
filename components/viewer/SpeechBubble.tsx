@@ -16,9 +16,9 @@ export function SpeechBubble({
 }: SpeechBubbleProps) {
   if (type === "narration") {
     return (
-      <div className="w-full px-1">
-        <div className="rounded border-2 border-black bg-comic-yellow px-2 py-1 shadow-[2px_2px_0_#000]">
-          <p className="font-comic-neue text-[8px] leading-tight text-black">
+      <div className="w-full max-w-[70%]">
+        <div className="rounded border-2 border-black bg-[#FFD600] px-2 py-1">
+          <p className="font-bangers text-[10px] leading-tight tracking-wide text-black">
             {text}
           </p>
         </div>
@@ -30,15 +30,12 @@ export function SpeechBubble({
     return (
       <div
         className={cn(
-          "relative max-w-[90%]",
+          "relative max-w-[70%]",
           side === "left" ? "mr-auto self-start" : "ml-auto self-end"
         )}
       >
-        <div className="relative rounded-[50%] border-2 border-black bg-white px-3 py-2 shadow-[2px_2px_0_#000]">
-          <p className="font-bangers text-[7px] uppercase tracking-wide text-comic-red">
-            {character}
-          </p>
-          <p className="font-comic-neue text-[9px] leading-tight text-black">
+        <div className="relative rounded-[50%] border-2 border-black bg-white px-3 py-2">
+          <p className="font-comic-neue text-[11px] font-bold italic leading-tight text-black">
             {text}
           </p>
           <span
@@ -55,6 +52,13 @@ export function SpeechBubble({
             )}
             aria-hidden
           />
+          <span
+            className={cn(
+              "absolute -bottom-6 size-1 rounded-full border border-black bg-white",
+              side === "left" ? "left-1" : "right-1"
+            )}
+            aria-hidden
+          />
         </div>
       </div>
     );
@@ -63,33 +67,30 @@ export function SpeechBubble({
   return (
     <div
       className={cn(
-        "relative max-w-[90%]",
+        "relative max-w-[70%]",
         side === "left" ? "mr-auto self-start" : "ml-auto self-end"
       )}
     >
       <div
         className={cn(
-          "relative rounded-xl border-2 border-black bg-white px-2 py-1.5 shadow-[2px_2px_0_#000]",
+          "relative rounded-[20px] border-2 border-black bg-white px-2.5 py-1.5",
           side === "left" ? "rounded-bl-sm" : "rounded-br-sm"
         )}
       >
-        <p className="font-bangers text-[7px] uppercase tracking-wide text-comic-red">
-          {character}
-        </p>
-        <p className="font-comic-neue text-[9px] leading-tight text-black">
+        <p className="font-comic-neue text-[11px] font-bold leading-tight text-black">
           {text}
         </p>
         <span
           className={cn(
             "absolute -bottom-2 h-0 w-0 border-x-[6px] border-t-[8px] border-x-transparent border-t-black",
-            side === "left" ? "left-3" : "right-3"
+            side === "left" ? "left-4" : "right-4"
           )}
           aria-hidden
         />
         <span
           className={cn(
             "absolute -bottom-[5px] h-0 w-0 border-x-[5px] border-t-[7px] border-x-transparent border-t-white",
-            side === "left" ? "left-[13px]" : "right-[13px]"
+            side === "left" ? "left-[17px]" : "right-[17px]"
           )}
           aria-hidden
         />
@@ -114,10 +115,27 @@ export function getBubbleSide(
   return lineIndex % 2 === 0 ? "left" : "right";
 }
 
-export function SfxText({ text }: { text: string }) {
+function hashSeed(seed: string): number {
+  let hash = 0;
+  for (let i = 0; i < seed.length; i++) {
+    hash = (hash << 5) - hash + seed.charCodeAt(i);
+    hash |= 0;
+  }
+  return hash;
+}
+
+export function SfxText({ text, seed }: { text: string; seed?: string }) {
+  const rotation = ((hashSeed(seed ?? text) % 21) - 10);
+
   return (
     <p
-      className="pointer-events-none absolute left-1/2 top-1/2 z-20 -translate-x-1/2 -translate-y-1/2 rotate-[-8deg] font-bangers text-xl uppercase leading-none text-comic-yellow drop-shadow-[2px_2px_0_#E8192C] [text-shadow:1px_1px_0_#000,-1px_-1px_0_#000,1px_-1px_0_#000,-1px_1px_0_#000]"
+      className="pointer-events-none absolute left-1/2 top-[35%] z-20 -translate-x-1/2 font-bangers text-[2rem] uppercase leading-none text-[#FFD600]"
+      style={{
+        transform: `translateX(-50%) rotate(${rotation}deg)`,
+        WebkitTextStroke: "2px black",
+        paintOrder: "stroke fill",
+        textShadow: "2px 2px 0 #000",
+      }}
       aria-hidden
     >
       {text}
