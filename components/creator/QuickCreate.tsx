@@ -14,20 +14,15 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  compressCharacterImages,
-  storeCharacterImage,
-} from "@/lib/characterImageStorage";
-import { createSavedComic } from "@/lib/comicStorage";
 import { GENRES, LOADING_MESSAGES } from "@/lib/createForm";
 import { getPriceForPages, PAGE_COUNTS, type PageCount } from "@/lib/pricing";
+import { persistAfterGenerate } from "@/lib/persistAfterGenerate";
 import {
   charactersWithImages,
   getCharacterCountMessage,
   matchImagesToCharacters,
   type QuickCreateImage,
 } from "@/lib/quickCreate";
-import { savePreviewState } from "@/lib/previewStorage";
 import type { Character, GeneratedComic } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -134,40 +129,18 @@ export function QuickCreate({ onBack }: QuickCreateProps) {
         imageMap
       );
 
-      for (const character of formCharacters) {
-        if (character.name && character.imageBase64) {
-          await storeCharacterImage(character.name, character.imageBase64);
-        }
+      const { warning } = await persistAfterGenerate({
+        comicData,
+        genre,
+        pageCount,
+        synopsis: story.trim(),
+        formCharacters,
+        characterImages: imageMap,
+      });
+
+      if (warning) {
+        setError(warning);
       }
-
-      const compressedImages = await compressCharacterImages(imageMap);
-
-      const savedComic = await createSavedComic({
-        title: comicData.title,
-        tagline: comicData.tagline,
-        genre,
-        pageCount,
-        comicData,
-        characterImages: compressedImages,
-        synopsis: story.trim(),
-        formCharacters,
-        status: "draft",
-      });
-
-      await savePreviewState({
-        comicId: savedComic.id,
-        genre,
-        synopsis: story.trim(),
-        pageCount,
-        price: getPriceForPages(pageCount),
-        comicData,
-        characterImages: Object.fromEntries(
-          formCharacters
-            .filter((c) => c.name && c.imageBase64)
-            .map((c) => [c.name, c.name])
-        ),
-        formCharacters,
-      });
 
       router.push("/preview");
     } catch (err) {

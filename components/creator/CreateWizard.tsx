@@ -15,13 +15,10 @@ import {
   loadCreateDraftFormData,
   saveCreateDraft,
 } from "@/lib/draftStorage";
-import { getPriceForPages } from "@/lib/pricing";
 import {
-  compressCharacterImages,
   resolveCharacterImages,
 } from "@/lib/characterImageStorage";
-import { createSavedComic } from "@/lib/comicStorage";
-import { savePreviewState } from "@/lib/previewStorage";
+import { persistAfterGenerate } from "@/lib/persistAfterGenerate";
 import type { GeneratedComic } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -137,34 +134,22 @@ export function CreateWizard({ onBackToLibrary }: CreateWizardProps) {
             .map((character) => [character.name, character.imageBase64])
         )
       );
-      const compressedImages = await compressCharacterImages(resolvedImages);
 
-      const savedComic = await createSavedComic({
-        title: comicData.title,
-        tagline: comicData.tagline,
+      const { warning } = await persistAfterGenerate({
+        comicData,
         genre: formData.genre,
         pageCount: formData.pageCount,
-        comicData,
-        characterImages: compressedImages,
         synopsis: formData.synopsis,
-        formCharacters: apiCharacters,
-        status: "draft",
+        formCharacters: apiCharacters.map((character) => ({
+          ...character,
+          imageBase64: resolvedImages[character.name] ?? character.imageBase64,
+        })),
+        characterImages: resolvedImages,
       });
 
-      await savePreviewState({
-        comicId: savedComic.id,
-        genre: formData.genre,
-        synopsis: formData.synopsis,
-        pageCount: formData.pageCount,
-        price: getPriceForPages(formData.pageCount),
-        comicData,
-        characterImages: Object.fromEntries(
-          formData.characters
-            .filter((character) => character.name && character.imageBase64)
-            .map((character) => [character.name, character.name])
-        ),
-        formCharacters: apiCharacters,
-      });
+      if (warning) {
+        setDraftMessage(warning);
+      }
 
       router.push("/preview");
     } catch (err) {

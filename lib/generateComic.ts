@@ -1,6 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 
-import type { Character, ComicPage, GeneratedComic, Panel } from "./types";
+import type { Character, ComicPage, DialogueType, GeneratedComic, PageLayout, Panel } from "./types";
 
 export interface GenerateComicInput {
   title: string;
@@ -23,7 +23,7 @@ export interface QuickCreateGenerateResult {
 }
 
 const COMIC_MODEL = "claude-sonnet-4-6";
-const COMIC_GENERATION_MAX_TOKENS = 4000;
+const COMIC_GENERATION_MAX_TOKENS = 8192;
 const MIN_COMIC_PAGE_COUNT = 2;
 
 const SYSTEM_PROMPT = `You are a professional comic book writer with 20 years experience writing for Marvel and DC. You write cinematic, emotionally gripping comics with sharp dialogue, real character voice, and dynamic action sequences.
@@ -131,6 +131,16 @@ Your JSON response MUST include a top-level "characters" array BEFORE "pages":
 }
 
 The "characters" array is required in quick create mode. Use the same character names consistently in panel "characters" arrays and dialogue.`;
+
+function sanitizeApiCharacters(characters: Character[]): Character[] {
+  return characters.map(({ name, role, powers, personality }) => ({
+    name,
+    role,
+    powers,
+    personality,
+    imageBase64: "",
+  }));
+}
 
 export class ComicGenerationError extends Error {
   constructor(message: string) {
@@ -376,6 +386,110 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function normalizeDialogueType(value: unknown): DialogueType {
+  if (value === "thought" || value === "narration" || value === "speech") {
+    return value;
+  }
+  return "speech";
+}
+
+function normalizePanelSize(value: unknown): Panel["size"] {
+  if (value === "large" || value === "medium" || value === "small") {
+    return value;
+  }
+  return "medium";
+}
+
+function normalizeLayout(value: unknown): PageLayout {
+  if (typeof value !== "string") {
+    return "four-panel";
+  }
+
+  const normalized = value.trim().toLowerCase().replace(/\s+/g, "-");
+  if (VALID_LAYOUTS.has(normalized)) {
+    return normalized as PageLayout;
+  }
+
+  return "four-panel";
+}
+
+function normalizeNullableString(value: unknown): string | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : null;
+  }
+  return String(value);
+}
+
+function normalizeComicPayload(parsed: unknown): unknown {
+  if (!isRecord(parsed) || !Array.isArray(parsed.pages)) {
+    return parsed;
+  }
+
+  return {
+    ...parsed,
+    title: typeof parsed.title === "string" ? parsed.title.trim() : parsed.title,
+    tagline:
+      typeof parsed.tagline === "string" ? parsed.tagline.trim() : parsed.tagline,
+    pages: parsed.pages.map((page, pageIndex) => {
+      if (!isRecord(page) || !Array.isArray(page.panels)) {
+        return page;
+      }
+
+      return {
+        ...page,
+        pageNumber:
+          typeof page.pageNumber === "number" ? page.pageNumber : pageIndex + 1,
+        layout: normalizeLayout(page.layout),
+        panels: page.panels.map((panel, panelIndex) => {
+          if (!isRecord(panel)) {
+            return panel;
+          }
+
+          const dialogue = Array.isArray(panel.dialogue)
+            ? panel.dialogue
+                .filter(isRecord)
+                .map((line) => ({
+                  character:
+                    typeof line.character === "string" ? line.character.trim() : "",
+                  type: normalizeDialogueType(line.type),
+                  text: typeof line.text === "string" ? line.text.trim() : "",
+                }))
+                .filter((line) => line.character && line.text)
+            : [];
+
+          const characters = Array.isArray(panel.characters)
+            ? panel.characters
+                .filter((item): item is string => typeof item === "string")
+                .map((name) => name.trim())
+                .filter(Boolean)
+            : [];
+
+          return {
+            ...panel,
+            panelNumber:
+              typeof panel.panelNumber === "number"
+                ? panel.panelNumber
+                : panelIndex + 1,
+            size: normalizePanelSize(panel.size),
+            setting:
+              typeof panel.setting === "string" ? panel.setting.trim() : "",
+            action: typeof panel.action === "string" ? panel.action.trim() : "",
+            mood: typeof panel.mood === "string" ? panel.mood.trim() : "",
+            characters,
+            dialogue,
+            sfx: normalizeNullableString(panel.sfx),
+            caption: normalizeNullableString(panel.caption),
+          };
+        }),
+      };
+    }),
+  };
+}
+
 function isDialogueLine(value: unknown): boolean {
   return (
     isRecord(value) &&
@@ -428,7 +542,8 @@ function isComicPage(value: unknown): value is ComicPage {
 }
 
 function parseGeneratedComic(text: string): GeneratedComic {
-  const parsed = parseJsonRobustly(text, "parseGeneratedComic");
+  const raw = parseJsonRobustly(text, "parseGeneratedComic");
+  const parsed = normalizeComicPayload(raw);
 
   if (!isRecord(parsed)) {
     throw new ComicGenerationError(
@@ -467,17 +582,43 @@ function parseGeneratedComic(text: string): GeneratedComic {
   };
 }
 
-function isExtractedCharacter(value: unknown): value is Omit<Character, "imageBase64"> {
+function isExtractedCharacter(
+  value: unknown
+): value is Omit<Character, "imageBase64"> {
   return (
     isRecord(value) &&
     typeof value.name === "string" &&
     value.name.trim() !== "" &&
     (value.role === "hero" ||
       value.role === "villain" ||
-      value.role === "sidekick") &&
-    typeof value.powers === "string" &&
-    typeof value.personality === "string"
+      value.role === "sidekick" ||
+      value.role === undefined)
   );
+}
+
+function toExtractedCharacter(
+  value: Omit<Character, "imageBase64"> | Record<string, unknown>
+): Character {
+  const role =
+    value.role === "hero" ||
+    value.role === "villain" ||
+    value.role === "sidekick"
+      ? value.role
+      : "hero";
+
+  return {
+    name: String(value.name).trim(),
+    role,
+    powers:
+      typeof value.powers === "string" && value.powers.trim()
+        ? value.powers.trim()
+        : "Unspecified powers",
+    personality:
+      typeof value.personality === "string" && value.personality.trim()
+        ? value.personality.trim()
+        : "Determined",
+    imageBase64: "",
+  };
 }
 
 function parseQuickCreateResponse(text: string): QuickCreateGenerateResult {
@@ -496,13 +637,7 @@ function parseQuickCreateResponse(text: string): QuickCreateGenerateResult {
   if (Array.isArray(parsed.characters) && parsed.characters.length > 0) {
     characters = parsed.characters
       .filter(isExtractedCharacter)
-      .map((character) => ({
-        name: character.name.trim(),
-        role: character.role,
-        powers: character.powers.trim(),
-        personality: character.personality.trim(),
-        imageBase64: "",
-      }));
+      .map((character) => toExtractedCharacter(character));
   }
 
   if (characters.length === 0) {
@@ -527,6 +662,11 @@ function parseQuickCreateResponse(text: string): QuickCreateGenerateResult {
   }
 
   return { comicData, characters };
+}
+
+/** @internal Used by parse smoke tests */
+export function parseComicJsonResponse(text: string): GeneratedComic {
+  return parseGeneratedComic(text);
 }
 
 function buildQuickCreateUserPrompt(input: QuickCreateGenerateInput): string {
@@ -751,12 +891,20 @@ export async function generateComic(
   const requestedPageCount = input.pageCount ?? 4;
   let attemptPageCount = requestedPageCount;
   let lastError: ComicGenerationError | undefined;
+  const sanitizedInput = {
+    ...input,
+    characters: sanitizeApiCharacters(input.characters),
+  };
 
   while (attemptPageCount >= MIN_COMIC_PAGE_COUNT) {
     let response: AnthropicComicResponse;
 
     try {
-      response = await requestComicFromAnthropic(client, input, attemptPageCount);
+      response = await requestComicFromAnthropic(
+        client,
+        sanitizedInput,
+        attemptPageCount
+      );
     } catch (error) {
       const message =
         error instanceof Error
