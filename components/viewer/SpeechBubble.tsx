@@ -77,6 +77,9 @@ export function SpeechBubble({
           side === "left" ? "rounded-bl-sm" : "rounded-br-sm"
         )}
       >
+        <p className="font-bangers text-[8px] uppercase tracking-wide text-comic-red">
+          {character}
+        </p>
         <p className="font-comic-neue text-[11px] font-bold leading-tight text-black">
           {text}
         </p>
