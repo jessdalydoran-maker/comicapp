@@ -14,7 +14,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { GENRES, LOADING_MESSAGES } from "@/lib/createForm";
+import { GENRES, LOADING_MESSAGES, type Genre } from "@/lib/createForm";
 import { getPriceForPages, PAGE_COUNTS, type PageCount } from "@/lib/pricing";
 import { persistAfterGenerate } from "@/lib/persistAfterGenerate";
 import {
@@ -24,7 +24,7 @@ import {
   type QuickCreateImage,
 } from "@/lib/quickCreate";
 import type { Character, GeneratedComic } from "@/lib/types";
-import { cn } from "@/lib/utils";
+import { cn, parseApiJsonResponse } from "@/lib/utils";
 
 interface QuickCreateProps {
   onBack: () => void;
@@ -43,7 +43,7 @@ export function QuickCreate({ onBack }: QuickCreateProps) {
   const router = useRouter();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [story, setStory] = useState("");
-  const [genre, setGenre] = useState<string>("");
+  const [genre, setGenre] = useState<Genre>(GENRES[0]);
   const [pageCount, setPageCount] = useState<PageCount>(8);
   const [images, setImages] = useState<QuickCreateImage[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -94,10 +94,29 @@ export function QuickCreate({ onBack }: QuickCreateProps) {
     setImages((current) => current.filter((_, i) => i !== index));
   }
 
-  const canGenerate = story.trim().length >= 50 && genre !== "";
+  const trimmedStory = story.trim();
+  const hasStory = trimmedStory.length >= 50;
+  const hasGenre = genre.trim().length > 0;
+  const hasPageCount = PAGE_COUNTS.includes(pageCount);
+  const canGenerate = hasStory && hasGenre && hasPageCount && !isLoading;
 
   async function handleGenerate() {
-    if (!canGenerate || isLoading) return;
+    if (isLoading) return;
+
+    if (!hasStory) {
+      setError("Please write at least 50 characters for your story.");
+      return;
+    }
+
+    if (!hasGenre) {
+      setError("Please pick a genre.");
+      return;
+    }
+
+    if (!hasPageCount) {
+      setError("Please pick a page count.");
+      return;
+    }
 
     setIsLoading(true);
     setError(null);
@@ -108,14 +127,18 @@ export function QuickCreate({ onBack }: QuickCreateProps) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           quickCreate: true,
-          story: story.trim(),
-          genre,
+          story: trimmedStory,
+          genre: genre.trim(),
           pageCount,
           imageFilenames: images.map((img) => img.filename),
         }),
       });
 
-      const result = await response.json();
+      const result = await parseApiJsonResponse<{
+        comicData?: GeneratedComic;
+        characters?: Character[];
+        error?: string;
+      }>(response);
 
       if (!response.ok) {
         throw new Error(result.error ?? "Failed to generate comic.");
@@ -279,8 +302,8 @@ export function QuickCreate({ onBack }: QuickCreateProps) {
           <div className="min-w-[160px] flex-1 space-y-2">
             <Label className="text-comic-yellow">Genre</Label>
             <Select
-              value={genre || undefined}
-              onValueChange={setGenre}
+              value={genre}
+              onValueChange={(value) => setGenre(value as Genre)}
               disabled={isLoading}
             >
               <SelectTrigger className="w-full border-comic-yellow/50 bg-black/50 font-comic-neue text-white">
